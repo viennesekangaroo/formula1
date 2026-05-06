@@ -576,24 +576,45 @@ export function RaceView({ replay, prev, next }: Props) {
   // Current "lap" (fractional) — for axis scrubbing on the trace plot. We use
   // the leader's progress: count laps where leader's lapEndSec ≤ tSec, plus
   // the fraction within the current lap.
+  // leaderEnds: end-time (race-clock seconds) of each *recorded* leader lap,
+  // in race order. Skips laps with no data so e.g. a red-flagged race
+  // doesn't fake a chunk of "phantom" laps. Each entry is {raceLap, endSec}
+  // where raceLap is the actual lap number from the dataset.
   const leaderEnds = useMemo(() => {
-    const m = new Map<number, number>();
+    const byLap = new Map<number, number>();
     for (const l of laps) {
-      const cur = m.get(l.lap);
-      if (cur === undefined || l.lapEndSec < cur) m.set(l.lap, l.lapEndSec);
+      const cur = byLap.get(l.lap);
+      if (cur === undefined || l.lapEndSec < cur) byLap.set(l.lap, l.lapEndSec);
     }
-    const out: number[] = [];
-    for (let i = 1; i <= totalLaps; i++) out.push(m.get(i) ?? out[out.length - 1] ?? 0);
-    return out;
-  }, [laps, totalLaps]);
+    const lapNums = Array.from(byLap.keys()).sort((a, b) => a - b);
+    return lapNums.map((n) => ({ raceLap: n, endSec: byLap.get(n)! }));
+  }, [laps]);
 
+  // Did the race have missing leader laps? (Red flag, suspension, etc.)
+  const raceHasGap = useMemo(() => {
+    if (leaderEnds.length === 0) return false;
+    return leaderEnds[leaderEnds.length - 1].raceLap !== leaderEnds.length;
+  }, [leaderEnds]);
+
+  // Number of leader laps with real data. Drives the "lap N / M" counter.
+  const recordedLaps = leaderEnds.length;
+
+  // raceLap (absolute lap number, e.g. Miami's 26) -> display index 1..N
+  // for the trace plot x-axis. Skipped laps are squeezed out.
+  const lapDisplayIdx = useMemo(() => {
+    const m = new Map<number, number>();
+    leaderEnds.forEach((e, i) => m.set(e.raceLap, i + 1));
+    return m;
+  }, [leaderEnds]);
+
+  // currentLap: fractional position into the *recorded* lap list (1-indexed).
   const currentLap = useMemo(() => {
     let lap = 0;
     for (let i = 0; i < leaderEnds.length; i++) {
-      if (tSec >= leaderEnds[i]) lap = i + 1;
+      if (tSec >= leaderEnds[i].endSec) lap = i + 1;
       else {
-        const prev = i === 0 ? 0 : leaderEnds[i - 1];
-        const span = leaderEnds[i] - prev;
+        const prev = i === 0 ? 0 : leaderEnds[i - 1].endSec;
+        const span = leaderEnds[i].endSec - prev;
         if (span > 0) lap = i + Math.max(0, (tSec - prev) / span);
         else lap = i + 1;
         break;
@@ -636,7 +657,7 @@ export function RaceView({ replay, prev, next }: Props) {
   // Trace plot scales.
   const xScale = (lap: number) => {
     const w = TRACE_W - TRACE_PAD.left - TRACE_PAD.right;
-    return TRACE_PAD.left + (totalLaps > 1 ? (lap - 1) / (totalLaps - 1) : 0) * w;
+    return TRACE_PAD.left + (recordedLaps > 1 ? (lap - 1) / (recordedLaps - 1) : 0) * w;
   };
   const yScale = (gap: number) => {
     const h = TRACE_H - TRACE_PAD.top - TRACE_PAD.bottom;
@@ -652,30 +673,34 @@ export function RaceView({ replay, prev, next }: Props) {
       const arr = series.get(d.driverNumber) ?? [];
       let path = "";
       for (const pt of arr) {
-        if (pt.lap > currentLap) break;
-        const x = xScale(pt.lap);
+        const displayLap = lapDisplayIdx.get(pt.lap);
+        if (displayLap === undefined) continue;
+        if (displayLap > currentLap) break;
+        const x = xScale(displayLap);
         const y = yScale(pt.gap);
         path += (path === "" ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1);
       }
       if (path) paths.push({ num: d.driverNumber, d: path, faded: hoverDriver !== null && hoverDriver !== d.driverNumber });
     }
     return paths;
-  }, [drivers, series, currentLap, hoverDriver, totalLaps, maxGap]);
+  }, [drivers, series, currentLap, hoverDriver, lapDisplayIdx, recordedLaps, maxGap]);
 
   // Pit markers: one tick per pit on the corresponding driver's line at the
-  // pit lap.
+  // pit lap (in display-index space, not absolute race-lap).
   const pitMarkers = useMemo(() => {
     const out: { num: number; cx: number; cy: number }[] = [];
     for (const p of pits) {
-      if (p.lap > currentLap) continue;
+      const displayLap = lapDisplayIdx.get(p.lap);
+      if (displayLap === undefined) continue;
+      if (displayLap > currentLap) continue;
       const arr = series.get(p.driverNumber);
       if (!arr) continue;
       const point = arr.find((s) => s.lap === p.lap);
       if (!point) continue;
-      out.push({ num: p.driverNumber, cx: xScale(point.lap), cy: yScale(point.gap) });
+      out.push({ num: p.driverNumber, cx: xScale(displayLap), cy: yScale(point.gap) });
     }
     return out;
-  }, [pits, series, currentLap]);
+  }, [pits, series, currentLap, lapDisplayIdx]);
 
   function colorFor(num: number) {
     const d = driversByNumber.get(num);
@@ -723,7 +748,12 @@ export function RaceView({ replay, prev, next }: Props) {
           </div>
         </div>
         <div className="text-right text-xs text-white/50">
-          <div>lap {Math.min(totalLaps, Math.ceil(currentLap)).toString().padStart(2, "0")} / {totalLaps}</div>
+          <div>
+            lap {Math.min(recordedLaps, Math.ceil(currentLap)).toString().padStart(2, "0")} / {recordedLaps}
+            {raceHasGap && (
+              <span title="Race had a red-flag suspension; some laps weren't recorded by OpenF1." className="ml-1 text-[9px] uppercase tracking-[0.2em] text-amber-300/70">·red flag</span>
+            )}
+          </div>
           <div className="tabular-nums">{fmtTime(tSec)} / {fmtTime(durationSec)}</div>
         </div>
       </header>
@@ -1017,23 +1047,31 @@ export function RaceView({ replay, prev, next }: Props) {
               className="w-full"
               style={{ height: "auto" }}
             >
-              {/* X grid: every 10 laps */}
-              {Array.from({ length: Math.floor(totalLaps / 10) + 1 }, (_, i) => i * 10).map((lap) => (
-                <g key={`xg-${lap}`}>
-                  <line
-                    x1={xScale(Math.max(1, lap))} x2={xScale(Math.max(1, lap))}
-                    y1={TRACE_PAD.top} y2={TRACE_H - TRACE_PAD.bottom}
-                    stroke="#fff" strokeOpacity={0.06}
-                  />
-                  <text
-                    x={xScale(Math.max(1, lap))} y={TRACE_H - 8}
-                    fill="#fff" fillOpacity={0.4}
-                    fontSize={10} textAnchor="middle"
-                  >
-                    {lap === 0 ? 1 : lap}
-                  </text>
-                </g>
-              ))}
+              {/* X grid: every 10 display laps. Labels show the *actual*
+                  race-lap number even though the axis is in display-index
+                  space, so red-flagged races (Miami 2025: 1, 26, 27...) read
+                  correctly. */}
+              {Array.from({ length: Math.floor(recordedLaps / 10) + 1 }, (_, i) => i * 10).map((displayLap) => {
+                const idx = Math.max(1, displayLap);
+                const e = leaderEnds[idx - 1];
+                const labelLap = e?.raceLap ?? idx;
+                return (
+                  <g key={`xg-${displayLap}`}>
+                    <line
+                      x1={xScale(idx)} x2={xScale(idx)}
+                      y1={TRACE_PAD.top} y2={TRACE_H - TRACE_PAD.bottom}
+                      stroke="#fff" strokeOpacity={0.06}
+                    />
+                    <text
+                      x={xScale(idx)} y={TRACE_H - 8}
+                      fill="#fff" fillOpacity={0.4}
+                      fontSize={10} textAnchor="middle"
+                    >
+                      {labelLap}
+                    </text>
+                  </g>
+                );
+              })}
               {/* Y axis ticks: 4 evenly spaced */}
               {[0, 0.25, 0.5, 0.75, 1].map((f) => {
                 const gap = maxGap * f;
