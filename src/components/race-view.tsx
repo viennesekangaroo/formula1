@@ -224,17 +224,16 @@ export function RaceView({ replay, prev, next }: Props) {
     return m;
   }, [telemetry]);
 
-  // Track viewBox derived from real coordinate bounds with a margin. We render
-  // y inverted because OpenF1's y axis points "up" but SVG's points "down".
+  // Track viewBox derived from real coordinate bounds with a margin. We
+  // render y inverted because OpenF1's y axis points "up" but SVG's points
+  // "down".
   const trackView = useMemo(() => {
     if (!trackBounds) return null;
-    const pad = 800; // coord units
+    const pad = 800;
     const x0 = trackBounds.minX - pad;
     const y0 = trackBounds.minY - pad;
     const w = (trackBounds.maxX - trackBounds.minX) + 2 * pad;
     const h = (trackBounds.maxY - trackBounds.minY) + 2 * pad;
-    // Flipping Y in code: we render with viewBox in original coords but apply
-    // a CSS transform on the inner <g> to flip vertically.
     return { x0, y0, w, h };
   }, [trackBounds]);
 
@@ -243,20 +242,69 @@ export function RaceView({ replay, prev, next }: Props) {
   // overlapping traces and gives a clean track silhouette.
   const trackOutline = useMemo(() => {
     if (traces.length === 0) return "";
-    // Pick the driver with the most location samples — they survived longest.
+    // Pick the driver with the most location samples — they survived longest
+    // and have the cleanest racing line.
     let best: typeof traces[number] | null = null;
     for (const t of traces) if (!best || t.t.length > best.t.length) best = t;
     if (!best) return "";
-    // Take the first ~3 minutes of clean racing (skip pre-grid junk).
-    const idxStart = best.t.findIndex((v) => v >= 0);
-    const idxEnd = best.t.findIndex((v) => v >= 360);
-    const lo = idxStart === -1 ? 0 : idxStart;
-    const hi = idxEnd === -1 ? best.t.length : idxEnd;
-    let d = "";
-    for (let i = lo; i < hi; i += 2) {
-      d += (i === lo ? "M" : "L") + best.x[i] + " " + best.y[i];
+
+    // Skip pre-grid samples; then walk forward from the start until the
+    // path returns near where it started — that's one complete lap, the
+    // ideal outline. Falls back to a fixed window if the close-the-loop
+    // detection doesn't trigger (very long laps, partial data).
+    const startIdx = (() => {
+      const i = best.t.findIndex((v) => v >= 0);
+      return i === -1 ? 0 : i;
+    })();
+    const x0 = best.x[startIdx];
+    const y0 = best.y[startIdx];
+    const closeDist = 800; // coord units — same scale as our pad
+    let endIdx = best.t.length;
+    // Walk past the first ~30 seconds (so we don't immediately match the
+    // start point) then look for the next sample within `closeDist` of the
+    // origin.
+    const minOffset = best.t.findIndex((v, idx) => idx > startIdx && v >= best.t[startIdx] + 30);
+    const searchFrom = minOffset === -1 ? startIdx + 50 : minOffset;
+    for (let i = searchFrom; i < best.t.length; i++) {
+      const dx = best.x[i] - x0;
+      const dy = best.y[i] - y0;
+      if (dx * dx + dy * dy < closeDist * closeDist) { endIdx = i + 1; break; }
     }
+
+    let d = "";
+    for (let i = startIdx; i < endIdx; i += 2) {
+      d += (i === startIdx ? "M" : "L") + best.x[i] + " " + best.y[i];
+    }
+    // Close the loop explicitly: the lap-end sample is near but not on the
+    // start point, leaving a visible gap. Add a final line back to the
+    // first sample.
+    if (endIdx > startIdx) d += "L" + best.x[startIdx] + " " + best.y[startIdx];
     return d;
+  }, [traces]);
+
+  // Start/finish line: position + heading at the leader's first
+  // post-grid sample. We average the next ~5 samples for a stable tangent.
+  const startLine = useMemo(() => {
+    if (traces.length === 0) return null;
+    let best: typeof traces[number] | null = null;
+    for (const t of traces) if (!best || t.t.length > best.t.length) best = t;
+    if (!best) return null;
+    const startIdx = Math.max(0, best.t.findIndex((v) => v >= 0));
+    if (best.x.length < startIdx + 6) return null;
+    // Tangent: average direction over next ~5 samples.
+    let sx = 0, sy = 0;
+    for (let i = startIdx; i < startIdx + 5; i++) {
+      sx += best.x[i + 1] - best.x[i];
+      sy += best.y[i + 1] - best.y[i];
+    }
+    const len = Math.hypot(sx, sy) || 1;
+    return {
+      x: best.x[startIdx],
+      y: best.y[startIdx],
+      // Unit tangent (along direction of travel).
+      tx: sx / len,
+      ty: sy / len,
+    };
   }, [traces]);
 
   // Imperative per-frame update: positions, top-speed badge, hover card.
@@ -589,24 +637,36 @@ export function RaceView({ replay, prev, next }: Props) {
           <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">
             2025 · round {meta.round}
           </div>
-          <h1 className="mt-1 text-3xl">{meta.raceName}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <h1 className="text-3xl">{meta.raceName}</h1>
+            <div className="flex items-center gap-2">
+              {prev && (
+                <Link
+                  href={`/race/${prev.round}`}
+                  aria-label={`Previous race: ${prev.name}`}
+                  className="rounded border border-white/15 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10 hover:text-white"
+                >
+                  ← {prev.name}
+                </Link>
+              )}
+              {next && (
+                <Link
+                  href={`/race/${next.round}`}
+                  aria-label={`Next race: ${next.name}`}
+                  className="rounded border border-white/15 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10 hover:text-white"
+                >
+                  {next.name} →
+                </Link>
+              )}
+            </div>
+          </div>
           <div className="mt-1 text-sm text-white/40">
             {meta.circuitName} · {meta.country} · {meta.date}
           </div>
         </div>
-        <div className="flex items-end gap-3">
-          <div className="text-right text-xs text-white/50">
-            <div>lap {Math.min(totalLaps, Math.ceil(currentLap)).toString().padStart(2, "0")} / {totalLaps}</div>
-            <div className="tabular-nums">{fmtTime(tSec)} / {fmtTime(durationSec)}</div>
-          </div>
-          <div className="flex flex-col gap-1 text-xs">
-            {prev ? (
-              <Link href={`/race/${prev.round}`} className="rounded border border-white/15 px-2 py-1 text-white/70 hover:bg-white/10">← {prev.name}</Link>
-            ) : <span />}
-            {next ? (
-              <Link href={`/race/${next.round}`} className="rounded border border-white/15 px-2 py-1 text-white/70 hover:bg-white/10">{next.name} →</Link>
-            ) : <span />}
-          </div>
+        <div className="text-right text-xs text-white/50">
+          <div>lap {Math.min(totalLaps, Math.ceil(currentLap)).toString().padStart(2, "0")} / {totalLaps}</div>
+          <div className="tabular-nums">{fmtTime(tSec)} / {fmtTime(durationSec)}</div>
         </div>
       </header>
 
@@ -664,23 +724,83 @@ export function RaceView({ replay, prev, next }: Props) {
                   viewBox={`${trackView.x0} ${trackView.y0} ${trackView.w} ${trackView.h}`}
                   className="h-full w-full"
                 >
-                  {/* Flip Y: OpenF1 +Y is "up", SVG +Y is "down". Translate
-                      then scale by -1 around the vertical mid so the layout
-                      reads correctly. */}
+                  {/* Flip Y: OpenF1 +Y is "up", SVG +Y is "down". */}
                   <g
                     transform={`translate(0 ${2 * trackView.y0 + trackView.h}) scale(1 -1)`}
                   >
-                    {trackOutline && (
-                      <path
-                        d={trackOutline}
-                        fill="none"
-                        stroke="#ffffff"
-                        strokeOpacity={0.12}
-                        strokeWidth={Math.max(80, trackView.w / 60)}
-                        strokeLinejoin="round"
-                        strokeLinecap="round"
-                      />
-                    )}
+                    {trackOutline && (() => {
+                      const trackWidth = Math.max(80, trackView.w / 60);
+                      const outlinePad = Math.max(4, trackView.w / 600);
+                      return (
+                        <>
+                          {/* Outer edge: thin light outline. */}
+                          <path
+                            d={trackOutline}
+                            fill="none"
+                            stroke="#ffffff"
+                            strokeOpacity={0.22}
+                            strokeWidth={trackWidth + outlinePad * 2}
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                          {/* Asphalt: dark fill so the road reads as a
+                              tarmac strip rather than a faded line. */}
+                          <path
+                            d={trackOutline}
+                            fill="none"
+                            stroke="#1a1a1a"
+                            strokeOpacity={1}
+                            strokeWidth={trackWidth}
+                            strokeLinejoin="round"
+                            strokeLinecap="round"
+                          />
+                        </>
+                      );
+                    })()}
+                    {startLine && (() => {
+                      const trackWidth = Math.max(80, trackView.w / 60);
+                      // Span well past the track edges so it reads as a flag.
+                      const lineLen = trackWidth * 2.0;
+                      // Bigger cells so the squares are visible at panel scale.
+                      const cellSize = trackWidth / 3;
+                      const cols = Math.max(8, Math.round(lineLen / cellSize));
+                      const rows = 3;
+                      // Perpendicular unit vector to the tangent.
+                      const px = -startLine.ty;
+                      const py = startLine.tx;
+                      // Anchor to the *start* of the track (one row back along
+                      // the direction of travel) so the cars appear to cross
+                      // it as they leave the grid.
+                      const ax = startLine.x - startLine.tx * cellSize * (rows / 2);
+                      const ay = startLine.y - startLine.ty * cellSize * (rows / 2);
+                      const cells: React.ReactElement[] = [];
+                      for (let r = 0; r < rows; r++) {
+                        for (let c = 0; c < cols; c++) {
+                          // Origin of this cell relative to anchor.
+                          const u = (c - cols / 2) * cellSize;
+                          const v = r * cellSize;
+                          const cx0 = ax + px * u + startLine.tx * v;
+                          const cy0 = ay + py * u + startLine.ty * v;
+                          // Build a quad by extending in tangent (depth) and
+                          // perpendicular (width) directions by cellSize.
+                          const corners = [
+                            [cx0, cy0],
+                            [cx0 + px * cellSize, cy0 + py * cellSize],
+                            [cx0 + px * cellSize + startLine.tx * cellSize, cy0 + py * cellSize + startLine.ty * cellSize],
+                            [cx0 + startLine.tx * cellSize, cy0 + startLine.ty * cellSize],
+                          ];
+                          const fill = (r + c) % 2 === 0 ? "#ffffff" : "#0a0a0a";
+                          cells.push(
+                            <polygon
+                              key={`s-${r}-${c}`}
+                              points={corners.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(" ")}
+                              fill={fill}
+                            />
+                          );
+                        }
+                      }
+                      return <g opacity={0.95}>{cells}</g>;
+                    })()}
                     <g ref={carsGroupRef}>
                       {drivers.map((d) => {
                         const isHover = hoverDriver === d.driverNumber;

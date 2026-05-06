@@ -198,6 +198,17 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- Pre-rendered replay payloads. The /api/race/[round] route reads these
+-- directly without doing the 5-table reshape on every request. Built by
+-- scripts/precompute-replays.ts; one row per race.
+CREATE TABLE IF NOT EXISTS replay_cache (
+  season    INTEGER NOT NULL,
+  round     INTEGER NOT NULL,
+  json      TEXT NOT NULL,
+  built_at  TEXT NOT NULL,
+  PRIMARY KEY (season, round)
+);
 `;
 
 let _client: Client | null = null;

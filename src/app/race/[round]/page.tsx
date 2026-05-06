@@ -1,11 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { loadRaceReplay, listRaces } from "@/lib/race-data";
-import { RaceView } from "@/components/race-view";
+import { listRaces, loadRaceMeta } from "@/lib/race-data";
+import { RaceLoader } from "@/components/race-loader";
 
-// Race data is immutable once a race has happened — cache for a day.
-// In prod, the first request hits Turso once and every subsequent request
-// for the same round is served from the Vercel edge cache.
+// Page shell is cached for a day. The heavy replay JSON is served by the
+// /api/race/[round] route which has its own (much longer) edge cache.
 export const revalidate = 86400;
 
 export default async function RacePage({ params }: { params: Promise<{ round: string }> }) {
@@ -16,11 +15,12 @@ export default async function RacePage({ params }: { params: Promise<{ round: st
   const all = await listRaces(2025);
   const idx = all.findIndex((r) => r.round === round);
   if (idx === -1) notFound();
-  const prev = all.slice(0, idx).reverse().find((r) => r.sessionKey !== null) ?? null;
-  const next = all.slice(idx + 1).find((r) => r.sessionKey !== null) ?? null;
+  const meta = await loadRaceMeta(2025, round);
+  const prev = idx > 0 ? all[idx - 1] : null;
+  const next = idx < all.length - 1 ? all[idx + 1] : null;
 
-  const replay = await loadRaceReplay(2025, round);
-  if (!replay) {
+  // No OpenF1 session for this round yet — show the placeholder.
+  if (!meta || meta.sessionKey === null) {
     return (
       <div className="mx-auto max-w-4xl px-6 pt-16 pb-32">
         <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">2025 · round {round}</div>
@@ -41,8 +41,9 @@ export default async function RacePage({ params }: { params: Promise<{ round: st
   }
 
   return (
-    <RaceView
-      replay={replay}
+    <RaceLoader
+      round={round}
+      meta={meta}
       prev={prev ? { round: prev.round, name: prev.raceName } : null}
       next={next ? { round: next.round, name: next.raceName } : null}
     />

@@ -128,46 +128,102 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
 
   const sessionKey = meta.sessionKey;
 
-  // OpenF1 driver_number is the same as Kaggle race_results.driver_number, so
-  // we can left-join on (season, round, driver_number) for finish status.
-  const drivers = await query<RaceDriver>(
-    `SELECT od.driver_number AS driverNumber, od.acronym AS acronym, od.full_name AS fullName,
-           od.team_name AS team, od.team_color AS teamColor,
-           rr.status AS finishStatus, rr.laps AS classifiedLaps
-    FROM openf1_drivers od
-    LEFT JOIN race_results rr
-      ON rr.season = ? AND rr.round = ? AND rr.driver_number = od.driver_number
-    WHERE od.session_key = ?
-    ORDER BY od.driver_number`,
-    [season, round, sessionKey],
-    (r) => ({
-      driverNumber: r.driverNumber as number,
-      acronym: r.acronym as string,
-      fullName: r.fullName as string,
-      team: r.team as string,
-      teamColor: r.teamColor as string | null,
-      finishStatus: r.finishStatus as string | null,
-      classifiedLaps: r.classifiedLaps as number | null,
-    }),
-  );
-
-  // Build per-driver cumulative lap times. We anchor each driver to a shared
-  // race clock: t=0 is the earliest lap start across the field.
+  // Fan out all 6 reads in parallel. They only depend on sessionKey, so the
+  // network round-trips overlap — total wall-time is roughly the slowest
+  // single query (locations) instead of the sum.
   type RawLap = {
     driver_number: number; lap_number: number; lap_duration: number | null; date_start: string | null;
   };
-  const rawLaps = await query<RawLap>(
-    `SELECT driver_number, lap_number, lap_duration, date_start
-    FROM openf1_laps WHERE session_key = ?
-    ORDER BY driver_number, lap_number`,
-    [sessionKey],
-    (r) => ({
-      driver_number: r.driver_number as number,
-      lap_number: r.lap_number as number,
-      lap_duration: r.lap_duration as number | null,
-      date_start: r.date_start as string | null,
-    }),
-  );
+  type RawPos = { driver_number: number; date: string; position: number };
+  type RawPit = { driver_number: number; lap_number: number | null; pit_duration: number | null };
+  type RawLoc = { driver_number: number; t_sec: number; x: number; y: number };
+  type RawCar = {
+    driver_number: number; t_sec: number;
+    speed: number | null; throttle: number | null; brake: number | null;
+    n_gear: number | null; drs: number | null;
+  };
+
+  const [drivers, rawLaps, rawPos, rawPits, rawLocs, rawCars] = await Promise.all([
+    query<RaceDriver>(
+      `SELECT od.driver_number AS driverNumber, od.acronym AS acronym, od.full_name AS fullName,
+             od.team_name AS team, od.team_color AS teamColor,
+             rr.status AS finishStatus, rr.laps AS classifiedLaps
+      FROM openf1_drivers od
+      LEFT JOIN race_results rr
+        ON rr.season = ? AND rr.round = ? AND rr.driver_number = od.driver_number
+      WHERE od.session_key = ?
+      ORDER BY od.driver_number`,
+      [season, round, sessionKey],
+      (r) => ({
+        driverNumber: r.driverNumber as number,
+        acronym: r.acronym as string,
+        fullName: r.fullName as string,
+        team: r.team as string,
+        teamColor: r.teamColor as string | null,
+        finishStatus: r.finishStatus as string | null,
+        classifiedLaps: r.classifiedLaps as number | null,
+      }),
+    ),
+    query<RawLap>(
+      `SELECT driver_number, lap_number, lap_duration, date_start
+      FROM openf1_laps WHERE session_key = ?
+      ORDER BY driver_number, lap_number`,
+      [sessionKey],
+      (r) => ({
+        driver_number: r.driver_number as number,
+        lap_number: r.lap_number as number,
+        lap_duration: r.lap_duration as number | null,
+        date_start: r.date_start as string | null,
+      }),
+    ),
+    query<RawPos>(
+      `SELECT driver_number, date, position FROM openf1_positions
+      WHERE session_key = ? ORDER BY date`,
+      [sessionKey],
+      (r) => ({
+        driver_number: r.driver_number as number,
+        date: r.date as string,
+        position: r.position as number,
+      }),
+    ),
+    query<RawPit>(
+      `SELECT driver_number, lap_number, pit_duration FROM openf1_pits
+      WHERE session_key = ? AND lap_number IS NOT NULL`,
+      [sessionKey],
+      (r) => ({
+        driver_number: r.driver_number as number,
+        lap_number: r.lap_number as number | null,
+        pit_duration: r.pit_duration as number | null,
+      }),
+    ),
+    query<RawLoc>(
+      `SELECT driver_number, t_sec, x, y FROM openf1_locations
+      WHERE session_key = ?
+      ORDER BY driver_number, t_sec`,
+      [sessionKey],
+      (r) => ({
+        driver_number: r.driver_number as number,
+        t_sec: r.t_sec as number,
+        x: r.x as number,
+        y: r.y as number,
+      }),
+    ),
+    query<RawCar>(
+      `SELECT driver_number, t_sec, speed, throttle, brake, n_gear, drs
+      FROM openf1_car_data WHERE session_key = ?
+      ORDER BY driver_number, t_sec`,
+      [sessionKey],
+      (r) => ({
+        driver_number: r.driver_number as number,
+        t_sec: r.t_sec as number,
+        speed: r.speed as number | null,
+        throttle: r.throttle as number | null,
+        brake: r.brake as number | null,
+        n_gear: r.n_gear as number | null,
+        drs: r.drs as number | null,
+      }),
+    ),
+  ]);
 
   // Race start: earliest lap-1 date_start.
   let raceStartMs: number | null = null;
@@ -241,17 +297,6 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
   }
 
   // Positions.
-  type RawPos = { driver_number: number; date: string; position: number };
-  const rawPos = await query<RawPos>(
-    `SELECT driver_number, date, position FROM openf1_positions
-    WHERE session_key = ? ORDER BY date`,
-    [sessionKey],
-    (r) => ({
-      driver_number: r.driver_number as number,
-      date: r.date as string,
-      position: r.position as number,
-    }),
-  );
   const positions: PositionEvent[] = rawPos.map((p) => ({
     driverNumber: p.driver_number,
     tSec: (Date.parse(p.date) - raceStartMs) / 1000,
@@ -259,17 +304,6 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
   })).filter((p) => Number.isFinite(p.tSec));
 
   // Pits.
-  type RawPit = { driver_number: number; lap_number: number | null; pit_duration: number | null };
-  const rawPits = await query<RawPit>(
-    `SELECT driver_number, lap_number, pit_duration FROM openf1_pits
-    WHERE session_key = ? AND lap_number IS NOT NULL`,
-    [sessionKey],
-    (r) => ({
-      driver_number: r.driver_number as number,
-      lap_number: r.lap_number as number | null,
-      pit_duration: r.pit_duration as number | null,
-    }),
-  );
   const pits: PitEvent[] = rawPits.map((p) => ({
     driverNumber: p.driver_number,
     lap: p.lap_number!,
@@ -280,21 +314,8 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
   let durationSec = 0;
   for (const l of laps) if (l.lapEndSec > durationSec) durationSec = l.lapEndSec;
 
-  // Real coordinate traces from OpenF1 /location.
-  type RawLoc = { driver_number: number; t_sec: number; x: number; y: number };
-  const rawLocs = await query<RawLoc>(
-    `SELECT driver_number, t_sec, x, y FROM openf1_locations
-    WHERE session_key = ?
-    ORDER BY driver_number, t_sec`,
-    [sessionKey],
-    (r) => ({
-      driver_number: r.driver_number as number,
-      t_sec: r.t_sec as number,
-      x: r.x as number,
-      y: r.y as number,
-    }),
-  );
-
+  // Real coordinate traces from OpenF1 /location (pulled in the parallel
+  // fan-out above).
   const traceMap = new Map<number, { t: number[]; x: number[]; y: number[] }>();
   let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
   for (const row of rawLocs) {
@@ -314,28 +335,8 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
   }
   const trackBounds = traces.length > 0 ? { minX, maxX, minY, maxY } : null;
 
-  // Car telemetry traces (speed / throttle / brake / gear / drs).
-  type RawCar = {
-    driver_number: number; t_sec: number;
-    speed: number | null; throttle: number | null; brake: number | null;
-    n_gear: number | null; drs: number | null;
-  };
-  const rawCars = await query<RawCar>(
-    `SELECT driver_number, t_sec, speed, throttle, brake, n_gear, drs
-    FROM openf1_car_data WHERE session_key = ?
-    ORDER BY driver_number, t_sec`,
-    [sessionKey],
-    (r) => ({
-      driver_number: r.driver_number as number,
-      t_sec: r.t_sec as number,
-      speed: r.speed as number | null,
-      throttle: r.throttle as number | null,
-      brake: r.brake as number | null,
-      n_gear: r.n_gear as number | null,
-      drs: r.drs as number | null,
-    }),
-  );
-
+  // Car telemetry traces (speed / throttle / brake / gear / drs) — pulled in
+  // the parallel fan-out above.
   type TelMap = { t: number[]; speed: number[]; throttle: number[]; brake: number[]; gear: number[]; drs: number[] };
   const telMap = new Map<number, TelMap>();
   for (const r of rawCars) {
