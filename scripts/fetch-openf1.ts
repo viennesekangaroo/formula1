@@ -245,7 +245,13 @@ async function fetchOneRace(
   // Find the Race session for this date. OpenF1 uses date_start which is a
   // datetime; we match by year + the race date's day.
   const sessions = await getJson<OF1Session[]>("/sessions", { year: season, session_type: "Race" });
-  const target = sessions.find((s) => s.date_start.startsWith(race.date));
+  // Try exact date match first, then ±1 day for races whose UTC start
+  // straddles midnight in their local time (e.g. Vegas night race).
+  const raceDayMs = Date.parse(race.date + "T12:00:00Z");
+  let target = sessions.find((s) => s.date_start.startsWith(race.date));
+  if (!target) {
+    target = sessions.find((s) => Math.abs(Date.parse(s.date_start) - raceDayMs) <= 36 * 3600 * 1000);
+  }
   if (!target) {
     console.warn(`  no OpenF1 Race session matches date ${race.date} — skipping`);
     return;

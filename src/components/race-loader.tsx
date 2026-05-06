@@ -74,7 +74,7 @@ export function RaceLoader({ season, round, meta, prev, next }: Props) {
             <div className="flex items-center gap-2">
               {prev && (
                 <Link
-                  href={`/race/${prev.round}`}
+                  href={`/${meta.season}/race/${prev.round}`}
                   className="rounded border border-white/15 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10 hover:text-white"
                 >
                   ← {prev.name}
@@ -82,7 +82,7 @@ export function RaceLoader({ season, round, meta, prev, next }: Props) {
               )}
               {next && (
                 <Link
-                  href={`/race/${next.round}`}
+                  href={`/${meta.season}/race/${next.round}`}
                   className="rounded border border-white/15 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10 hover:text-white"
                 >
                   {next.name} →
