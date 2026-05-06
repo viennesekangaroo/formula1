@@ -49,6 +49,8 @@ export type PitEvent = {
   driverNumber: number;
   lap: number;
   durationSec: number;
+  /** Race-clock seconds at the start of the stop (entering the pit box). */
+  tSec: number;
 };
 
 // Real (x,y) coordinate samples per driver, with t in seconds since race
@@ -75,6 +77,10 @@ export type DriverTelemetry = {
 
 export type TrackBounds = { minX: number; maxX: number; minY: number; maxY: number };
 
+// SVG path data for a derived pit-lane outline. Built by sampling low-speed
+// pit-stop location data; sent down with the rest of the replay JSON.
+export type PitLane = string;
+
 export type RaceReplay = {
   meta: RaceMeta;
   drivers: RaceDriver[];
@@ -85,6 +91,7 @@ export type RaceReplay = {
   telemetry: DriverTelemetry[];
   trackBounds: TrackBounds | null;
   durationSec: number;
+  pitLane: PitLane;
 };
 
 export async function loadRaceMeta(season: number, round: number): Promise<RaceMeta | null> {
@@ -135,7 +142,7 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
     driver_number: number; lap_number: number; lap_duration: number | null; date_start: string | null;
   };
   type RawPos = { driver_number: number; date: string; position: number };
-  type RawPit = { driver_number: number; lap_number: number | null; pit_duration: number | null };
+  type RawPit = { driver_number: number; lap_number: number | null; pit_duration: number | null; date: string | null };
   type RawLoc = { driver_number: number; t_sec: number; x: number; y: number };
   type RawCar = {
     driver_number: number; t_sec: number;
@@ -187,13 +194,14 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
       }),
     ),
     query<RawPit>(
-      `SELECT driver_number, lap_number, pit_duration FROM openf1_pits
+      `SELECT driver_number, lap_number, pit_duration, date FROM openf1_pits
       WHERE session_key = ? AND lap_number IS NOT NULL`,
       [sessionKey],
       (r) => ({
         driver_number: r.driver_number as number,
         lap_number: r.lap_number as number | null,
         pit_duration: r.pit_duration as number | null,
+        date: r.date as string | null,
       }),
     ),
     query<RawLoc>(
@@ -308,6 +316,7 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
     driverNumber: p.driver_number,
     lap: p.lap_number!,
     durationSec: p.pit_duration ?? 0,
+    tSec: p.date ? (Date.parse(p.date) - raceStartMs) / 1000 : 0,
   }));
 
   // Total race duration: max lapEndSec across drivers.
@@ -354,7 +363,63 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
     telemetry.push({ driverNumber, ...v });
   }
 
-  return { meta, drivers, laps, positions, pits, traces, telemetry, trackBounds, durationSec };
+  // Derive a pit-lane outline from the GPS samples around each pit stop.
+  // For every (driver, pit) pair, take that driver's location samples in
+  // [pitT - 8s, pitT + duration + 5s] — that captures the pit-entry path,
+  // the static pit box, and pit-exit. Median-smoothed and plotted as one
+  // big polyline; visually it resolves into the pit lane shape.
+  let pitLane = "";
+  if (rawPits.length > 0 && traces.length > 0) {
+    const driverTraces = new Map<number, DriverTrace>();
+    for (const t of traces) driverTraces.set(t.driverNumber, t);
+    type Pt = { t: number; x: number; y: number };
+    const samples: Pt[] = [];
+    for (const p of rawPits) {
+      if (!p.date || p.lap_number === null) continue;
+      const pitT = (Date.parse(p.date) - raceStartMs) / 1000;
+      if (!Number.isFinite(pitT)) continue;
+      const dur = p.pit_duration ?? 30;
+      const winStart = pitT - 8;
+      const winEnd = pitT + dur + 5;
+      const tr = driverTraces.get(p.driver_number);
+      if (!tr) continue;
+      // Linear scan; per-driver traces are sorted by t. Pit stops only
+      // happen a few times per race so this is cheap.
+      for (let i = 0; i < tr.t.length; i++) {
+        const tt = tr.t[i];
+        if (tt < winStart) continue;
+        if (tt > winEnd) break;
+        samples.push({ t: tt, x: tr.x[i], y: tr.y[i] });
+      }
+    }
+    if (samples.length > 0) {
+      // Sort by (x,y) into spatial buckets and emit one smoothed point per
+      // bucket. The pit lane is a 1D shape so a small bucket size collapses
+      // overlapping driver samples into a clean line.
+      const BUCKET = 60; // coord units
+      type Bucket = { sx: number; sy: number; n: number };
+      const buckets = new Map<string, Bucket>();
+      for (const s of samples) {
+        const key = `${Math.round(s.x / BUCKET)}|${Math.round(s.y / BUCKET)}`;
+        const b = buckets.get(key) ?? { sx: 0, sy: 0, n: 0 };
+        b.sx += s.x; b.sy += s.y; b.n += 1;
+        buckets.set(key, b);
+      }
+      // Emit centroids; only keep buckets seen by ≥3 samples to drop noise.
+      const pts: { x: number; y: number }[] = [];
+      for (const b of buckets.values()) {
+        if (b.n < 3) continue;
+        pts.push({ x: b.sx / b.n, y: b.sy / b.n });
+      }
+      // Render as disconnected dots — connecting them via a polyline would
+      // zig-zag because we don't know the right order in 2D. SVG-wise we
+      // can render this as many tiny "M…l 0 0" subpaths and stroke them
+      // with a wide round-cap so they read as a continuous fat line.
+      pitLane = pts.map((p) => `M${p.x.toFixed(0)} ${p.y.toFixed(0)}l0 0`).join(" ");
+    }
+  }
+
+  return { meta, drivers, laps, positions, pits, traces, telemetry, trackBounds, durationSec, pitLane };
 }
 
 export async function listRaces(season: number): Promise<{

@@ -44,7 +44,7 @@ const TRACK_W = 600;
 const TRACK_H = 400;
 
 export function RaceView({ replay, prev, next }: Props) {
-  const { meta, drivers, laps, positions, pits, traces, telemetry, trackBounds, durationSec } = replay;
+  const { meta, drivers, laps, positions, pits, traces, telemetry, trackBounds, durationSec, pitLane } = replay;
 
   // Build per-driver trace series: array of {lap, gap}. Sorted by lap. We
   // memoize once.
@@ -120,6 +120,7 @@ export function RaceView({ replay, prev, next }: Props) {
   // the trace and running-order don't re-render every frame.
   const clockRef = useRef(0);
   const carRefs = useRef<Map<number, SVGGElement | null>>(new Map());
+  const pitBadgeRefs = useRef<Map<number, SVGGElement | null>>(new Map());
   // Parent <g> for car dots — used to imperatively reorder children so the
   // current race leader is painted on top of trailing cars when they overlap.
   const carsGroupRef = useRef<SVGGElement | null>(null);
@@ -223,6 +224,21 @@ export function RaceView({ replay, prev, next }: Props) {
     }
     return m;
   }, [telemetry]);
+
+  // Per-driver pit windows: each entry is {start, end} in race-clock seconds.
+  // The tick loop checks if the playback time is inside any window and
+  // toggles the PIT badge accordingly.
+  const pitWindowsByDriver = useMemo(() => {
+    const m = new Map<number, { start: number; end: number }[]>();
+    for (const p of pits) {
+      if (!Number.isFinite(p.tSec) || p.tSec <= 0) continue;
+      const arr = m.get(p.driverNumber) ?? [];
+      arr.push({ start: p.tSec, end: p.tSec + p.durationSec });
+      m.set(p.driverNumber, arr);
+    }
+    for (const arr of m.values()) arr.sort((a, b) => a.start - b.start);
+    return m;
+  }, [pits]);
 
   // Track viewBox derived from real coordinate bounds with a margin. We
   // render y inverted because OpenF1's y axis points "up" but SVG's points
@@ -392,6 +408,22 @@ export function RaceView({ replay, prev, next }: Props) {
           node.setAttribute("opacity", "1");
         }
 
+        // PIT badge: visible whenever the playback clock is inside one of
+        // this driver's pit-stop windows. Cheap linear scan; pit stops are
+        // few (≤6 per driver per race).
+        const badge = pitBadgeRefs.current.get(d.driverNumber);
+        if (badge) {
+          const wins = pitWindowsByDriver.get(d.driverNumber);
+          let inPit = false;
+          if (wins) {
+            for (const w of wins) {
+              if (t >= w.start && t <= w.end) { inPit = true; break; }
+              if (w.start > t) break;
+            }
+          }
+          badge.style.display = inPit && onTrack ? "" : "none";
+        }
+
         // Telemetry — current speed at time t. Used for top-speed badge and
         // hover card. Skip retired drivers but include cars on the grid.
         if (!onTrack) continue;
@@ -513,7 +545,7 @@ export function RaceView({ replay, prev, next }: Props) {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [traceByDriver, telByDriver, drivers, driverLaps, posTimelineByDriver]);
+  }, [traceByDriver, telByDriver, drivers, driverLaps, posTimelineByDriver, pitWindowsByDriver]);
 
   // Current "lap" (fractional) — for axis scrubbing on the trace plot. We use
   // the leader's progress: count laps where leader's lapEndSec ≤ tSec, plus
@@ -728,6 +760,25 @@ export function RaceView({ replay, prev, next }: Props) {
                   <g
                     transform={`translate(0 ${2 * trackView.y0 + trackView.h}) scale(1 -1)`}
                   >
+                    {pitLane && (() => {
+                      // Pit lane: dimmer + slightly thinner than the racing
+                      // line, drawn underneath. Rendered as zero-length
+                      // sub-paths with round caps, so each cluster centroid
+                      // shows up as a fat dot, the chain reading as a
+                      // continuous lane.
+                      const trackWidth = Math.max(80, trackView.w / 60);
+                      return (
+                        <path
+                          d={pitLane}
+                          fill="none"
+                          stroke="#ffffff"
+                          strokeOpacity={0.10}
+                          strokeWidth={trackWidth * 0.6}
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                        />
+                      );
+                    })()}
                     {trackOutline && (() => {
                       const trackWidth = Math.max(80, trackView.w / 60);
                       return (
@@ -821,6 +872,33 @@ export function RaceView({ replay, prev, next }: Props) {
                                 pointerEvents="none"
                               >
                                 {d.acronym}
+                              </text>
+                            </g>
+                            {/* PIT badge — toggled via display by the tick loop. */}
+                            <g
+                              ref={(el) => { pitBadgeRefs.current.set(d.driverNumber, el); }}
+                              transform={`translate(0 ${r * 1.7}) scale(1 -1)`}
+                              style={{ display: "none" }}
+                            >
+                              <rect
+                                x={-r * 1.5}
+                                y={-r * 0.55}
+                                width={r * 3}
+                                height={r * 1.05}
+                                rx={r * 0.25}
+                                fill="#fde047"
+                                stroke="#000"
+                                strokeWidth={r * 0.08}
+                              />
+                              <text
+                                y={r * 0.25}
+                                textAnchor="middle"
+                                fontSize={r * 0.85}
+                                fontWeight={800}
+                                fill="#000"
+                                pointerEvents="none"
+                              >
+                                PIT
                               </text>
                             </g>
                           </g>

@@ -21,13 +21,37 @@ export function RaceLoader({ round, meta, prev, next }: Props) {
     let cancelled = false;
     setReplay(null);
     setError(null);
-    fetch(`/api/race/${round}`)
-      .then((r) => {
+
+    async function load() {
+      // Pre-built static file. Next.js sets Content-Encoding: br via the
+      // headers() rule in next.config.ts, so the browser decompresses
+      // natively — no JS decoder needed.
+      try {
+        const r = await fetch(`/api/race/${round}.json.br`);
+        if (r.ok) {
+          const data = (await r.json()) as RaceReplay;
+          if (!cancelled) setReplay(data);
+          return;
+        }
+      } catch {
+        // Fall through to the dynamic route below.
+      }
+
+      // Dev fallback: the dynamic Turso-backed API route. Slower but works
+      // when the static file hasn't been generated yet for a particular
+      // round (e.g. a brand-new race added since the last `npm run
+      // build:races`).
+      try {
+        const r = await fetch(`/api/race/${round}`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<RaceReplay>;
-      })
-      .then((data) => { if (!cancelled) setReplay(data); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); });
+        const data = (await r.json()) as RaceReplay;
+        if (!cancelled) setReplay(data);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    void load();
     return () => { cancelled = true; };
   }, [round]);
 

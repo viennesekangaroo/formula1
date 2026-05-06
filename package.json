@@ -12,7 +12,8 @@
     "migrate:turso": "node --env-file=.env.local --import=tsx scripts/migrate-to-turso.ts",
     "sync:race": "node --env-file=.env.local --import=tsx scripts/sync-race-to-turso.ts",
     "auto:sync": "node --env-file=.env.local --import=tsx scripts/auto-sync.ts",
-    "precompute": "node --env-file=.env.local --import=tsx scripts/precompute-replays.ts"
+    "precompute": "node --env-file=.env.local --import=tsx scripts/precompute-replays.ts",
+    "build:races": "tsx scripts/build-static-races.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",
