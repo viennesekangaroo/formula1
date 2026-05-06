@@ -15,10 +15,9 @@ export function SiteHeader() {
   // else as the Season tab.
   const isRace = pathname.includes("/race/") || pathname === "/race";
   const idx = isRace ? 1 : 0;
-  const safeIdx = idx === -1 ? 0 : idx;
-  const prev = safeIdx > 0 ? PAGES[safeIdx - 1] : null;
-  const next = safeIdx < PAGES.length - 1 ? PAGES[safeIdx + 1] : null;
-  const current = PAGES[safeIdx];
+  const prev = idx > 0 ? PAGES[idx - 1] : null;
+  const next = idx < PAGES.length - 1 ? PAGES[idx + 1] : null;
+  const current = PAGES[idx];
 
   return (
     <header className="pointer-events-none fixed inset-x-0 bottom-8 z-30 px-8">
@@ -39,7 +38,7 @@ export function SiteHeader() {
             >
               <span
                 className={`block h-1.5 rounded-full transition-all ${
-                  i === safeIdx ? "w-6 bg-white/70" : "w-1.5 bg-white/25 group-hover/dot:bg-white/70 group-hover/dot:w-2.5"
+                  i === idx ? "w-6 bg-white/70" : "w-1.5 bg-white/25 group-hover/dot:bg-white/70 group-hover/dot:w-2.5"
                 }`}
               />
             </Link>
