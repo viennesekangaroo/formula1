@@ -30,6 +30,7 @@ export type StaticSeason = {
 };
 
 const cache = new Map<number, StaticSeason | null>();
+let seasonsListCache: number[] | null = null;
 
 export async function loadStaticSeason(season: number): Promise<StaticSeason | null> {
   if (cache.has(season)) return cache.get(season) ?? null;
@@ -42,5 +43,25 @@ export async function loadStaticSeason(season: number): Promise<StaticSeason | n
   } catch {
     cache.set(season, null);
     return null;
+  }
+}
+
+/** All seasons with a generated season-{N}.json file, ascending. */
+export async function listAvailableSeasons(): Promise<number[]> {
+  if (seasonsListCache) return seasonsListCache;
+  const dir = path.join(process.cwd(), "public", "api");
+  try {
+    const entries = await fs.readdir(dir);
+    const out: number[] = [];
+    for (const f of entries) {
+      const m = f.match(/^season-(\d{4})\.json$/);
+      if (m) out.push(Number(m[1]));
+    }
+    out.sort((a, b) => a - b);
+    seasonsListCache = out;
+    return out;
+  } catch {
+    seasonsListCache = [];
+    return [];
   }
 }

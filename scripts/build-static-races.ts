@@ -74,7 +74,8 @@ function loadReplayFromLocal(db: Database.Database, season: number, round: numbe
     ORDER BY driver_number, lap_number
   `).all(sessionKey) as RawLap[];
 
-  // Race start anchor: earliest lap-1 date_start.
+  // Race start anchor: earliest lap-1 date_start. Falls back to earliest
+  // date_start across any lap (red-flag restart races).
   let raceStartMs: number | null = null;
   for (const l of rawLaps) {
     if (l.lap_number === 1 && l.date_start) {
@@ -83,8 +84,14 @@ function loadReplayFromLocal(db: Database.Database, season: number, round: numbe
     }
   }
   if (raceStartMs === null) {
-    raceStartMs = rawLaps[0]?.date_start ? Date.parse(rawLaps[0].date_start) : 0;
+    for (const l of rawLaps) {
+      if (l.date_start) {
+        const ms = Date.parse(l.date_start);
+        if (raceStartMs === null || ms < raceStartMs) raceStartMs = ms;
+      }
+    }
   }
+  if (raceStartMs === null) raceStartMs = 0;
 
   // Per-driver cumulative lap times.
   type DriverLap = { lap: number; lapEndSec: number; lapDuration: number | null };
@@ -268,7 +275,9 @@ async function main() {
     rounds = r.map((row) => row.round);
   }
 
-  const outDir = path.join(process.cwd(), "public", "api", "race");
+  // Season-prefixed output so we can host multiple seasons side by side
+  // without stomping each other.
+  const outDir = path.join(process.cwd(), "public", "api", "race", String(season));
   await fs.mkdir(outDir, { recursive: true });
 
   console.log(`[build:races] generating ${rounds.length} race(s) -> ${outDir}`);

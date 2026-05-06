@@ -233,7 +233,9 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
     ),
   ]);
 
-  // Race start: earliest lap-1 date_start.
+  // Race start: earliest lap-1 date_start across the field. Falls back to
+  // the earliest date_start across *any* lap if lap-1 wasn't recorded
+  // (red-flag restart races like Miami 2025).
   let raceStartMs: number | null = null;
   for (const l of rawLaps) {
     if (l.lap_number === 1 && l.date_start) {
@@ -242,8 +244,14 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
     }
   }
   if (raceStartMs === null) {
-    raceStartMs = rawLaps[0]?.date_start ? Date.parse(rawLaps[0].date_start) : 0;
+    for (const l of rawLaps) {
+      if (l.date_start) {
+        const ms = Date.parse(l.date_start);
+        if (raceStartMs === null || ms < raceStartMs) raceStartMs = ms;
+      }
+    }
   }
+  if (raceStartMs === null) raceStartMs = 0;
 
   // Group raw laps by driver.
   const byDriver = new Map<number, RawLap[]>();

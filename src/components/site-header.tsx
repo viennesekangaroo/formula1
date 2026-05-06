@@ -10,12 +10,11 @@ const PAGES = [
 
 export function SiteHeader() {
   const pathname = usePathname();
-  const idx = PAGES.findIndex((p) => {
-    if (p.href === pathname) return true;
-    if (p.href === "/") return pathname === "/";
-    const base = p.href.split("/").slice(0, 2).join("/"); // /race/1 -> /race
-    return pathname.startsWith(base);
-  });
+  // Active-tab detection: the season pages live at /<year> and /<year>/race/<n>.
+  // We treat anything with /race/ in the path as the Race tab; everything
+  // else as the Season tab.
+  const isRace = pathname.includes("/race/") || pathname === "/race";
+  const idx = isRace ? 1 : 0;
   const safeIdx = idx === -1 ? 0 : idx;
   const prev = safeIdx > 0 ? PAGES[safeIdx - 1] : null;
   const next = safeIdx < PAGES.length - 1 ? PAGES[safeIdx + 1] : null;

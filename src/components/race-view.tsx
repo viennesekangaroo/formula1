@@ -667,14 +667,14 @@ export function RaceView({ replay, prev, next }: Props) {
       <header className="mb-6 flex items-end justify-between gap-4">
         <div>
           <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">
-            2025 · round {meta.round}
+            {meta.season} · round {meta.round}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-3">
             <h1 className="text-3xl">{meta.raceName}</h1>
             <div className="flex items-center gap-2">
               {prev && (
                 <Link
-                  href={`/race/${prev.round}`}
+                  href={`/${meta.season}/race/${prev.round}`}
                   aria-label={`Previous race: ${prev.name}`}
                   className="rounded border border-white/15 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10 hover:text-white"
                 >
@@ -683,7 +683,7 @@ export function RaceView({ replay, prev, next }: Props) {
               )}
               {next && (
                 <Link
-                  href={`/race/${next.round}`}
+                  href={`/${meta.season}/race/${next.round}`}
                   aria-label={`Next race: ${next.name}`}
                   className="rounded border border-white/15 px-3 py-1.5 text-xs text-white/80 hover:bg-white/10 hover:text-white"
                 >

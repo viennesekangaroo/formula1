@@ -5,6 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { WORLD_PATH_D, WORLD_VIEWBOX } from "@/lib/world-path";
 
 export type SeasonMapRound = {
+  /** Season year — used for routing to /<season>/race/<round>. */
+  season: number;
   round: number;
   raceName: string;
   circuitName: string;
@@ -198,7 +200,7 @@ export function SeasonMap({ rounds }: { rounds: SeasonMapRound[] }) {
                 strokeWidth={stroke}
               />
               <Link
-                href={r.hasReplay ? `/race/${r.round}` : "#"}
+                href={r.hasReplay ? `/${r.season}/race/${r.round}` : "#"}
                 aria-label={r.raceName}
                 onClick={(e) => {
                   if (dragRef.current?.moved) e.preventDefault();

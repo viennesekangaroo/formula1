@@ -125,13 +125,15 @@ function parseArgs() {
 async function fetchLocations(
   db: ReturnType<typeof openDb>, sessionKey: number, drivers: OF1Driver[], hz: number,
 ) {
-  // Reuse the race-start anchor we use for laps: earliest lap-1 date_start.
+  // Race-start anchor: earliest date_start across any lap. Some races
+  // (e.g. red-flag restarts) don't have a date_start on lap 1, so we fall
+  // back to the earliest available lap.
   const firstLap = db.prepare(
-    `SELECT date_start FROM openf1_laps WHERE session_key=? AND lap_number=1
+    `SELECT date_start FROM openf1_laps WHERE session_key=?
      AND date_start IS NOT NULL ORDER BY date_start ASC LIMIT 1`,
   ).get(sessionKey) as { date_start: string } | undefined;
   if (!firstLap) {
-    console.warn(`  location fetch skipped — no lap-1 anchor in DB`);
+    console.warn(`  fetch skipped — no lap date_start in DB`);
     return;
   }
   const raceStartMs = Date.parse(firstLap.date_start);
@@ -142,8 +144,19 @@ async function fetchLocations(
     (session_key, driver_number, t_sec, x, y) VALUES (?, ?, ?, ?, ?)`);
 
   let totalKept = 0;
+  let skipped = 0;
   for (const d of drivers) {
-    const data = await getJson<OF1Location[]>("/location", { session_key: sessionKey, driver_number: d.driver_number });
+    let data: OF1Location[];
+    try {
+      data = await getJson<OF1Location[]>("/location", { session_key: sessionKey, driver_number: d.driver_number });
+    } catch (e) {
+      // OpenF1 sometimes 422s for individual drivers (no telemetry recorded
+      // for that car in this session). Skip them rather than aborting the
+      // whole race.
+      console.warn(`    skip driver #${d.driver_number} location: ${e instanceof Error ? e.message : e}`);
+      skipped++;
+      continue;
+    }
     if (!Array.isArray(data) || data.length === 0) continue;
     // Sort defensively; OpenF1 returns ordered but no contract.
     data.sort((a, b) => a.date.localeCompare(b.date));
@@ -171,11 +184,11 @@ async function fetchCarData(
   db: ReturnType<typeof openDb>, sessionKey: number, drivers: OF1Driver[], hz: number,
 ) {
   const firstLap = db.prepare(
-    `SELECT date_start FROM openf1_laps WHERE session_key=? AND lap_number=1
+    `SELECT date_start FROM openf1_laps WHERE session_key=?
      AND date_start IS NOT NULL ORDER BY date_start ASC LIMIT 1`,
   ).get(sessionKey) as { date_start: string } | undefined;
   if (!firstLap) {
-    console.warn(`  car_data fetch skipped — no lap-1 anchor in DB`);
+    console.warn(`  car_data fetch skipped — no lap date_start in DB`);
     return;
   }
   const raceStartMs = Date.parse(firstLap.date_start);
@@ -187,7 +200,13 @@ async function fetchCarData(
 
   let totalKept = 0;
   for (const d of drivers) {
-    const data = await getJson<OF1Car[]>("/car_data", { session_key: sessionKey, driver_number: d.driver_number });
+    let data: OF1Car[];
+    try {
+      data = await getJson<OF1Car[]>("/car_data", { session_key: sessionKey, driver_number: d.driver_number });
+    } catch (e) {
+      console.warn(`    skip driver #${d.driver_number} car_data: ${e instanceof Error ? e.message : e}`);
+      continue;
+    }
     if (!Array.isArray(data) || data.length === 0) continue;
     data.sort((a, b) => a.date.localeCompare(b.date));
 

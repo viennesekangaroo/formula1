@@ -7,13 +7,14 @@ import { RaceView } from "@/components/race-view";
 import type { RaceMeta, RaceReplay } from "@/lib/race-data";
 
 type Props = {
+  season: number;
   round: number;
   meta: RaceMeta;
   prev: { round: number; name: string } | null;
   next: { round: number; name: string } | null;
 };
 
-export function RaceLoader({ round, meta, prev, next }: Props) {
+export function RaceLoader({ season, round, meta, prev, next }: Props) {
   const [replay, setReplay] = useState<RaceReplay | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,7 +28,7 @@ export function RaceLoader({ round, meta, prev, next }: Props) {
       // headers() rule in next.config.ts, so the browser decompresses
       // natively — no JS decoder needed.
       try {
-        const r = await fetch(`/api/race/${round}.json.br`);
+        const r = await fetch(`/api/race/${season}/${round}.json.br`);
         if (r.ok) {
           const data = (await r.json()) as RaceReplay;
           if (!cancelled) setReplay(data);
@@ -53,7 +54,7 @@ export function RaceLoader({ round, meta, prev, next }: Props) {
 
     void load();
     return () => { cancelled = true; };
-  }, [round]);
+  }, [season, round]);
 
   if (replay) {
     return <RaceView replay={replay} prev={prev} next={next} />;
@@ -66,7 +67,7 @@ export function RaceLoader({ round, meta, prev, next }: Props) {
       <header className="mb-6 flex items-end justify-between gap-4">
         <div>
           <div className="text-[10px] uppercase tracking-[0.4em] text-white/40">
-            2025 · round {meta.round}
+            {meta.season} · round {meta.round}
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-3">
             <h1 className="text-3xl">{meta.raceName}</h1>

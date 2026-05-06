@@ -11,7 +11,7 @@ const nextConfig: NextConfig = {
         // brotli decoder. Race data is immutable — cache forever on the
         // CDN, and a long browser cache is fine since we publish-and-go
         // (a new commit changes the URL anyway because Vercel busts).
-        source: "/api/race/:round.json.br",
+        source: "/api/race/:season/:round.json.br",
         headers: [
           { key: "Content-Type", value: "application/json" },
           { key: "Content-Encoding", value: "br" },
