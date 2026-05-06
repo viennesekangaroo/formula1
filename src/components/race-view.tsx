@@ -258,10 +258,26 @@ export function RaceView({ replay, prev, next }: Props) {
   // overlapping traces and gives a clean track silhouette.
   const trackOutline = useMemo(() => {
     if (traces.length === 0) return "";
-    // Pick the driver with the most location samples — they survived longest
-    // and have the cleanest racing line.
+    // Pick the driver with the most *moving* GPS coverage. Some races have
+    // drivers whose stream froze early (OpenF1 returned the same x,y for
+    // hundreds of samples — Austria 2025 VER is the canonical example).
+    // We score each candidate by counting how many distinct buckets the
+    // trace passes through; that ignores frozen samples and rewards a real
+    // lap traversal.
+    const BUCKET = 200;
+    function coverageScore(t: typeof traces[number]): number {
+      const seen = new Set<string>();
+      for (let i = 0; i < t.x.length; i++) {
+        seen.add(`${Math.round(t.x[i] / BUCKET)}|${Math.round(t.y[i] / BUCKET)}`);
+      }
+      return seen.size;
+    }
     let best: typeof traces[number] | null = null;
-    for (const t of traces) if (!best || t.t.length > best.t.length) best = t;
+    let bestScore = -1;
+    for (const t of traces) {
+      const score = coverageScore(t);
+      if (score > bestScore) { best = t; bestScore = score; }
+    }
     if (!best) return "";
 
     // Skip pre-grid samples; then walk forward from the start until the
@@ -388,7 +404,17 @@ export function RaceView({ replay, prev, next }: Props) {
           node.setAttribute("opacity", finished ? "0.7" : "0");
           onTrack = false;
         } else if (t < ts[0]) {
-          node.setAttribute("opacity", "0");
+          // Before this driver's first GPS sample — pre-grid or red-flag
+          // suspension (Miami 2025 has cars parked while the race is held).
+          // Park at the start/finish line so they're visible as "waiting".
+          if (startLine) {
+            node.setAttribute("transform", `translate(${startLine.x} ${startLine.y})`);
+            node.setAttribute("opacity", "0.65");
+          } else {
+            // No start line yet (rare). Fall back to first GPS sample.
+            node.setAttribute("transform", `translate(${tr.x[0]} ${tr.y[0]})`);
+            node.setAttribute("opacity", "0.65");
+          }
           onTrack = false;
         } else {
           let lo = 0, hi = ts.length - 1;
