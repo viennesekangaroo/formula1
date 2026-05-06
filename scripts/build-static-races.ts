@@ -290,6 +290,13 @@ async function main() {
     process.stdout.write(`  R${r}: `);
     const replay = loadReplayFromLocal(db, season, r);
     if (!replay) { console.log("no data"); continue; }
+    // Skip stubs — races where OpenF1 has a session entry but no actual
+    // lap timing yet (upcoming races). The page treats those as "no
+    // replay yet" via the season manifest.
+    if (replay.laps.length === 0) {
+      console.log("no laps yet — skipping");
+      continue;
+    }
     const json = JSON.stringify(replay);
     const raw = Buffer.byteLength(json, "utf8");
     // Brotli with high quality (slow at build time, small at runtime).
@@ -327,7 +334,9 @@ async function main() {
       r.season AS season, r.round AS round, r.race_name AS raceName, r.date AS date,
       r.circuit_id AS circuitId, c.name AS circuitName, c.country AS country,
       c.lat AS lat, c.lng AS lng,
-      CASE WHEN s.session_key IS NULL THEN 0 ELSE 1 END AS hasReplay,
+      CASE WHEN s.session_key IS NULL THEN 0
+           WHEN (SELECT COUNT(*) FROM openf1_laps WHERE session_key = s.session_key) = 0 THEN 0
+           ELSE 1 END AS hasReplay,
       w.driver_name AS winnerName,
       w.constructor AS winnerConstructor,
       w.constructor_id AS winnerConstructorId,
