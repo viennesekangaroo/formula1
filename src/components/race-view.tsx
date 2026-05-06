@@ -730,31 +730,16 @@ export function RaceView({ replay, prev, next }: Props) {
                   >
                     {trackOutline && (() => {
                       const trackWidth = Math.max(80, trackView.w / 60);
-                      const outlinePad = Math.max(4, trackView.w / 600);
                       return (
-                        <>
-                          {/* Outer edge: thin light outline. */}
-                          <path
-                            d={trackOutline}
-                            fill="none"
-                            stroke="#ffffff"
-                            strokeOpacity={0.22}
-                            strokeWidth={trackWidth + outlinePad * 2}
-                            strokeLinejoin="round"
-                            strokeLinecap="round"
-                          />
-                          {/* Asphalt: dark fill so the road reads as a
-                              tarmac strip rather than a faded line. */}
-                          <path
-                            d={trackOutline}
-                            fill="none"
-                            stroke="#1a1a1a"
-                            strokeOpacity={1}
-                            strokeWidth={trackWidth}
-                            strokeLinejoin="round"
-                            strokeLinecap="round"
-                          />
-                        </>
+                        <path
+                          d={trackOutline}
+                          fill="none"
+                          stroke="#ffffff"
+                          strokeOpacity={0.22}
+                          strokeWidth={trackWidth}
+                          strokeLinejoin="round"
+                          strokeLinecap="round"
+                        />
                       );
                     })()}
                     {startLine && (() => {

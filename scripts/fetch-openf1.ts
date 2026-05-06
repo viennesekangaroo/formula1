@@ -234,10 +234,14 @@ async function fetchOneRace(
   console.log(`  session_key=${target.session_key} meeting_key=${target.meeting_key}`);
 
   // Replace any existing rows for this session_key so re-runs are clean.
+  // Delete child tables first (reverse FK order) so we don't violate FK
+  // constraints. openf1_sessions is the parent, deleted last.
   const tx = db.transaction(() => {
-    db.prepare(`DELETE FROM openf1_laps WHERE session_key=?`).run(target.session_key);
-    db.prepare(`DELETE FROM openf1_positions WHERE session_key=?`).run(target.session_key);
+    db.prepare(`DELETE FROM openf1_locations WHERE session_key=?`).run(target.session_key);
+    db.prepare(`DELETE FROM openf1_car_data WHERE session_key=?`).run(target.session_key);
     db.prepare(`DELETE FROM openf1_pits WHERE session_key=?`).run(target.session_key);
+    db.prepare(`DELETE FROM openf1_positions WHERE session_key=?`).run(target.session_key);
+    db.prepare(`DELETE FROM openf1_laps WHERE session_key=?`).run(target.session_key);
     db.prepare(`DELETE FROM openf1_drivers WHERE session_key=?`).run(target.session_key);
     db.prepare(`DELETE FROM openf1_sessions WHERE session_key=?`).run(target.session_key);
 
