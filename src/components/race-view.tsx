@@ -20,11 +20,17 @@ function surnameOf(fullName: string): string {
 }
 
 // True if the driver's status indicates they completed the race or were
-// classified (e.g. "Finished", "+1 Lap"). Anything else is a retirement.
+// classified. The Kaggle dataset uses several distinct values for
+// "finished, lapped":
+//   - "Finished"     — on the lead lap
+//   - "+1 Lap" etc.  — finished one or more laps down (older datasets)
+//   - "Lapped"       — finished one or more laps down (current dataset)
+// Anything else (Retired, DNF, Disqualified, etc) is treated as out.
 function isClassified(status: string | null): boolean {
   if (!status) return true; // unknown → assume finisher rather than over-flag
   if (status === "Finished") return true;
-  if (/^\+\d/.test(status)) return true; // "+1 Lap", "+2 Laps", ...
+  if (status === "Lapped") return true;
+  if (/^\+\d/.test(status)) return true;
   return false;
 }
 
