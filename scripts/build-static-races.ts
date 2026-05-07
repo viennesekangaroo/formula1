@@ -59,7 +59,8 @@ function loadReplayFromLocal(db: Database.Database, season: number, round: numbe
   const drivers = db.prepare(`
     SELECT od.driver_number AS driverNumber, od.acronym AS acronym, od.full_name AS fullName,
            od.team_name AS team, od.team_color AS teamColor,
-           rr.status AS finishStatus, rr.laps AS classifiedLaps
+           rr.status AS finishStatus, rr.laps AS classifiedLaps,
+           rr.position AS finishPosition, rr.time_finished AS timeFinished
     FROM openf1_drivers od
     LEFT JOIN race_results rr
       ON rr.season = ? AND rr.round = ? AND rr.driver_number = od.driver_number

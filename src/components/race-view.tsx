@@ -34,6 +34,21 @@ function isClassified(status: string | null): boolean {
   return false;
 }
 
+// Format the running-order time column. Mirrors the F1 timing convention:
+//   - P1: total race time ('1:24:38.241')
+//   - On-lap finishers: gap to leader ('+7.995')
+//   - Lapped finishers: how many laps down ('+1 lap')
+//   - DSQ / Retired / DNS / unknown: blank
+function finishTimeDisplay(d: { finishStatus: string | null; classifiedLaps: number | null; finishPosition: number | null; timeFinished: string | null }, leaderLaps: number): string {
+  if (!d.timeFinished) return "";
+  if (d.finishPosition === 1) return d.timeFinished;
+  if (d.finishStatus === "Lapped" && d.classifiedLaps !== null && leaderLaps > 0) {
+    const down = leaderLaps - d.classifiedLaps;
+    return down === 1 ? "+1 lap" : `+${down} laps`;
+  }
+  return d.timeFinished; // already in "+SS.sss" or "+M:SS.sss" form
+}
+
 type Props = {
   replay: RaceReplay;
   prev: { round: number; name: string } | null;
@@ -604,6 +619,13 @@ export function RaceView({ replay, prev, next }: Props) {
 
   // Number of leader laps with real data. Drives the "lap N / M" counter.
   const recordedLaps = leaderEnds.length;
+  // Max classified-laps across the field — used to compute "+N laps" gaps
+  // for lapped drivers in the running-order time column.
+  const leaderTotalLaps = useMemo(() => {
+    let max = 0;
+    for (const d of drivers) if (d.classifiedLaps !== null && d.classifiedLaps > max) max = d.classifiedLaps;
+    return max;
+  }, [drivers]);
 
   // raceLap (absolute lap number, e.g. Miami's 26) -> display index 1..N
   // for the trace plot x-axis. Skipped laps are squeezed out.
@@ -1188,6 +1210,7 @@ export function RaceView({ replay, prev, next }: Props) {
               const d = driversByNumber.get(r.driverNumber);
               if (!d) return null;
               const active = hoverDriver === r.driverNumber;
+              const time = finishTimeDisplay(d, leaderTotalLaps);
               return (
                 <li
                   key={r.driverNumber}
@@ -1206,6 +1229,9 @@ export function RaceView({ replay, prev, next }: Props) {
                     <div className="truncate text-sm text-white/90">{surnameOf(d.fullName)}</div>
                     <div className="truncate text-[11px] text-white/40">{d.team}</div>
                   </div>
+                  {time && (
+                    <span className="ml-2 shrink-0 text-[11px] tabular-nums text-white/50">{time}</span>
+                  )}
                   {active && (
                     <DriverHoverCard
                       driver={d}

@@ -25,6 +25,13 @@ export type RaceDriver = {
   // Laps actually completed per the official result. 0 = lap-1 incident, no
   // racing lap completed; treated as "did not race" by the renderer.
   classifiedLaps: number | null;
+  // Final classified position from race_results (1-based). Drives the
+  // running-order sort and lets us show finish times for completed races.
+  finishPosition: number | null;
+  // race_results.time_finished — for the winner this is total race time
+  // ("1:24:38.241"), for others it's the gap to the leader ("+7.995").
+  // Empty/null for retirees.
+  timeFinished: string | null;
 };
 
 // Per-driver per-lap. lapEndSec is the playback clock at the end of that lap
@@ -154,7 +161,8 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
     query<RaceDriver>(
       `SELECT od.driver_number AS driverNumber, od.acronym AS acronym, od.full_name AS fullName,
              od.team_name AS team, od.team_color AS teamColor,
-             rr.status AS finishStatus, rr.laps AS classifiedLaps
+             rr.status AS finishStatus, rr.laps AS classifiedLaps,
+             rr.position AS finishPosition, rr.time_finished AS timeFinished
       FROM openf1_drivers od
       LEFT JOIN race_results rr
         ON rr.season = ? AND rr.round = ? AND rr.driver_number = od.driver_number
@@ -169,6 +177,8 @@ export async function loadRaceReplay(season: number, round: number): Promise<Rac
         teamColor: r.teamColor as string | null,
         finishStatus: r.finishStatus as string | null,
         classifiedLaps: r.classifiedLaps as number | null,
+        finishPosition: r.finishPosition as number | null,
+        timeFinished: r.timeFinished as string | null,
       }),
     ),
     query<RawLap>(

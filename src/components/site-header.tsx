@@ -3,16 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const PAGES = [
-  { href: "/", label: "Season" },
-  { href: "/race/1", label: "Race" },
-];
-
 export function SiteHeader() {
   const pathname = usePathname();
-  // Active-tab detection: the season pages live at /<year> and /<year>/race/<n>.
-  // We treat anything with /race/ in the path as the Race tab; everything
-  // else as the Season tab.
+  // Pull the season year out of /<year>(/race/<n>)? so the Season/Race nav
+  // stays scoped to whichever year the user is viewing. Falls back to no
+  // prefix when on /, /race/N, or any path without a year — those
+  // already redirect to the latest available season.
+  const seasonMatch = pathname.match(/^\/(\d{4})(?:\/|$)/);
+  const seasonPrefix = seasonMatch ? `/${seasonMatch[1]}` : "";
+  const PAGES = [
+    { href: seasonPrefix || "/", label: "Season" },
+    { href: `${seasonPrefix}/race/1`, label: "Race" },
+  ];
+
   const isRace = pathname.includes("/race/") || pathname === "/race";
   const idx = isRace ? 1 : 0;
   const prev = idx > 0 ? PAGES[idx - 1] : null;
