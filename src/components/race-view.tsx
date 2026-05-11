@@ -393,12 +393,12 @@ export function RaceView({ replay, prev, next }: Props) {
 
         // Lap-0 retirees and drivers without trace data: hide entirely.
         if (d.classifiedLaps !== null && d.classifiedLaps === 0) {
-          node.setAttribute("opacity", "0");
+          node.style.opacity = "0";
           continue;
         }
         const tr = traceByDriver.get(d.driverNumber);
         if (!tr || tr.t.length === 0) {
-          node.setAttribute("opacity", "0");
+          node.style.opacity = "0";
           continue;
         }
 
@@ -416,13 +416,13 @@ export function RaceView({ replay, prev, next }: Props) {
 
         if (!finished && t > retireCutoff) {
           // Retired — pull off the track entirely.
-          node.setAttribute("opacity", "0");
+          node.style.opacity = "0";
           onTrack = false;
         } else if (t > lastT + 1) {
           // Past end of GPS stream. Finishers park at the last sample dimmed.
           const i = ts.length - 1;
           node.setAttribute("transform", `translate(${tr.x[i]} ${tr.y[i]})`);
-          node.setAttribute("opacity", finished ? "0.7" : "0");
+          node.style.opacity = finished ? "0.7" : "0";
           onTrack = false;
         } else if (t < ts[0]) {
           // Before this driver's first GPS sample — pre-grid or red-flag
@@ -430,11 +430,11 @@ export function RaceView({ replay, prev, next }: Props) {
           // Park at the start/finish line so they're visible as "waiting".
           if (startLine) {
             node.setAttribute("transform", `translate(${startLine.x} ${startLine.y})`);
-            node.setAttribute("opacity", "0.65");
+            node.style.opacity = "0.65";
           } else {
             // No start line yet (rare). Fall back to first GPS sample.
             node.setAttribute("transform", `translate(${tr.x[0]} ${tr.y[0]})`);
-            node.setAttribute("opacity", "0.65");
+            node.style.opacity = "0.65";
           }
           onTrack = false;
         } else {
@@ -452,7 +452,7 @@ export function RaceView({ replay, prev, next }: Props) {
           const x = tr.x[i] + (tr.x[j] - tr.x[i]) * f;
           const y = tr.y[i] + (tr.y[j] - tr.y[i]) * f;
           node.setAttribute("transform", `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
-          node.setAttribute("opacity", "1");
+          node.style.opacity = "1";
         }
 
         // PIT badge: visible whenever the playback clock is inside one of
@@ -932,10 +932,12 @@ export function RaceView({ replay, prev, next }: Props) {
                           <g
                             key={d.driverNumber}
                             ref={(el) => { carRefs.current.set(d.driverNumber, el); }}
-                            opacity={0}
                             onMouseEnter={() => setHoverDriver(d.driverNumber)}
                             onMouseLeave={() => setHoverDriver(null)}
-                            style={{ cursor: "pointer" }}
+                            // CSS-side opacity (not the SVG attribute) so the
+                            // 250ms transition applies — gives retirees a
+                            // gentle fade instead of an abrupt disappearance.
+                            style={{ cursor: "pointer", opacity: 0, transition: "opacity 250ms ease-out" }}
                           >
                             <circle
                               r={r}
